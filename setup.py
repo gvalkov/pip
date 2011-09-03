@@ -1,12 +1,10 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-import sys
+from sys import version as pyversion
 from os.path import abspath, dirname, join as pjoin
 
-
-# If you change this version, change it also in docs/conf.py
-version = '1.0.2'
+from pip.version import version
 
 
 here = abspath(dirname(__file__))
@@ -54,7 +52,7 @@ classifiers = (
 
 kw = {
     'name'                 : 'pip',
-    'version'              : version,
+    'version'              : version(),
 
     'description'          : description,
     'long_description'     : long_description % locals(),
@@ -78,7 +76,7 @@ kw = {
         'console_scripts'  :
         (
             'pip    = pip:main',
-            'pip-%s = pip:main' % sys.version[:3],
+            'pip-%s = pip:main' % pyversion[:3],
         )
     },
 
