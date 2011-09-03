@@ -1,55 +1,90 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
 import sys
-import os
-from setuptools import setup
+from os.path import abspath, dirname, join as pjoin
+
 
 # If you change this version, change it also in docs/conf.py
-version = "1.0.2"
+version = '1.0.2'
 
-doc_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "docs")
-index_filename = os.path.join(doc_dir, "index.txt")
-news_filename = os.path.join(doc_dir, "news.txt")
-long_description = """
+
+here = abspath(dirname(__file__))
+
+index_filename = pjoin(here, 'docs', 'index.txt')
+news_filename  = pjoin(here, 'docs', 'news.txt')
+
+
+# Remove the toctree from the sphinx index, as it breaks long_description
+index = open(index_filename).read()
+news  = open(news_filename).read()
+
+index_a, index_toc, index_b = index.split('split here', 2)
+
+
+description = 'pip installs packages. Python packages. An easy_install replacement'
+long_description = '''%(index_a)s
 
 The main website for pip is `www.pip-installer.org
 <http://www.pip-installer.org>`_.  You can also install
 the `in-development version <https://github.com/pypa/pip/tarball/develop#egg=pip-dev>`_
 of pip with ``easy_install pip==dev``.
 
-"""
-f = open(index_filename)
-# remove the toctree from sphinx index, as it breaks long_description
-parts = f.read().split("split here", 2)
-long_description = parts[0] + long_description + parts[2]
-f.close()
-f = open(news_filename)
-long_description += "\n\n" + f.read()
-f.close()
+%(index_b)s
 
-setup(name="pip",
-      version=version,
-      description="pip installs packages. Python packages. An easy_install replacement",
-      long_description=long_description,
-      classifiers=[
-        'Development Status :: 5 - Production/Stable',
-        'Intended Audience :: Developers',
-        'License :: OSI Approved :: MIT License',
-        'Topic :: Software Development :: Build Tools',
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.4',
-        'Programming Language :: Python :: 2.5',
-        'Programming Language :: Python :: 2.6',
-        'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.1',
-        'Programming Language :: Python :: 3.2',
-      ],
-      keywords='easy_install distutils setuptools egg virtualenv',
-      author='The pip developers',
-      author_email='python-virtualenv@groups.google.com',
-      url='http://www.pip-installer.org',
-      license='MIT',
-      packages=['pip', 'pip.commands', 'pip.vcs'],
-      entry_points=dict(console_scripts=['pip=pip:main', 'pip-%s=pip:main' % sys.version[:3]]),
-      test_suite='nose.collector',
-      tests_require=['nose', 'virtualenv>=1.6', 'scripttest>=1.1.1', 'mock'],
-      zip_safe=False)
+%(news)s
+'''
+
+
+classifiers = (
+    'Development Status :: 5 - Production/Stable',
+    'Intended Audience :: Developers',
+    'License :: OSI Approved :: MIT License',
+    'Topic :: Software Development :: Build Tools',
+    'Programming Language :: Python :: 2',
+    'Programming Language :: Python :: 2.4',
+    'Programming Language :: Python :: 2.5',
+    'Programming Language :: Python :: 2.6',
+    'Programming Language :: Python :: 2.7',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.1',
+    'Programming Language :: Python :: 3.2',
+)
+
+
+kw = {
+    'name'                 : 'pip',
+    'version'              : version,
+
+    'description'          : description,
+    'long_description'     : long_description % locals(),
+
+    'author'               : 'The pip developers',
+    'author_email'         : 'python-virtualenv@groups.google.com',
+
+    'license'              : 'MIT',
+
+    'keywords'             : 'easy_install distutils setuptools egg virtualenv',
+    'classifiers'          : classifiers,
+
+    'url'                  : 'http://www.pip-installer.org',
+
+    'packages'             : ('pip', 'pip.commands', 'pip.vcs'),
+
+    'test_requires'        : ('nose', 'virtualenv>=1.6', 'scripttest>=1.1.1', 'mock'),
+    'test_suite'           : 'nose.collector',
+
+    'entry_points'         : {
+        'console_scripts'  :
+        (
+            'pip    = pip:main',
+            'pip-%s = pip:main' % sys.version[:3],
+        )
+    },
+
+    'zip_safe'             : False,
+}
+
+
+from setuptools import setup
+setup(**kw)
