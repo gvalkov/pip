@@ -7,12 +7,14 @@ import sys
 import re
 import difflib
 
-from pip.backwardcompat import walk_packages, console_to_str
-from pip.basecommand import command_dict, load_command, load_all_commands, command_names
-from pip.baseparser import parser
+from pip.backwardcompat import walk_packages
 from pip.exceptions import InstallationError
 from pip.log import logger
 from pip.util import get_installed_distributions
+from pip.baseparser import create_main_parser
+from pip.commands import commands, get_similar_commands, get_summaries
+from pip.exceptions import CommandError, PipError
+from pip.commands import commands, get_similar_commands, get_summaries
 
 
 def autocomplete():
@@ -31,7 +33,7 @@ def autocomplete():
     except IndexError:
         current = ''
     load_all_commands()
-    subcommands = [cmd for cmd, cls in command_dict.items() if not cls.hidden]
+    subcommands = [cmd for cmd, cls in commands.items() if not cls.hidden]
     options = []
     # subcommand
     try:
@@ -55,7 +57,7 @@ def autocomplete():
                 for dist in installed:
                     print(dist)
                 sys.exit(1)
-        subcommand = command_dict.get(subcommand_name)
+        subcommand = commands.get(subcommand_name)
         options += [(opt.get_opt_string(), opt.nargs)
                     for opt in subcommand.parser.option_list
                     if opt.help != optparse.SUPPRESS_HELP]
@@ -88,31 +90,63 @@ def version_control():
         __import__(modname)
 
 
+def parseopts(args):
+    parser = create_main_parser()
+
+    # create command listing
+    command_summaries = get_summaries()
+
+    description = ['Commands:']
+    description.extend(['  %-20s %s' % (i, j) for i,j in command_summaries])
+
+    parser.description = '\n'.join(description)
+
+    options, args = parser.parse_args(args)
+
+    if options.version:
+        sys.stdout.write(parser.version)
+        sys.stdout.write(os.linesep)
+        sys.exit()
+
+    # pip || pip help || pip --help -> print_help()
+    if options.help or not args or (args[0] == 'help' and len(args) == 1):
+        parser.print_help()
+        sys.exit()
+
+    if not args:
+        msg = 'You must give a command (use "pip --help" to see a list of commands)'
+        raise CommandError
+
+    command = args[0].lower()
+
+    if command not in commands:
+        guess = get_similar_commands(command)
+
+        msg = ['unknown command "%s"' % command]
+        if guess:
+           msg.append('maybe you meant "%s"' % guess)
+
+        raise CommandError(' - '.join(msg)) # TODO:
+
+    return command, options, args, parser
+
+
 def main(initial_args=None):
     if initial_args is None:
         initial_args = sys.argv[1:]
+
     autocomplete()
     version_control()
-    options, args = parser.parse_args(initial_args)
-    if options.help and not args:
-        args = ['help']
-    if not args:
-        parser.error('You must give a command (use "pip help" to see a list of commands)')
-    command = args[0].lower()
-    load_command(command)
-    if command not in command_dict:
-        close_commands = difflib.get_close_matches(command, command_names())
-        if close_commands:
-            guess = close_commands[0]
-            if args[1:]:
-                guess = "%s %s" % (guess, " ".join(args[1:]))
-        else:
-            guess = 'install %s' % command
-        error_dict = {'arg': command, 'guess': guess,
-                      'script': os.path.basename(sys.argv[0])}
-        parser.error('No command by the name %(script)s %(arg)s\n  '
-                     '(maybe you meant "%(script)s %(guess)s")' % error_dict)
-    command = command_dict[command]
+
+    try:
+        cmd_name, options, args, parser = parseopts(initial_args)
+    except PipError:
+        e = sys.exc_info()[1]
+        sys.stderr.write(str(e))
+        sys.stderr.write(os.linesep)
+        sys.exit(1)
+
+    command = commands[cmd_name](parser) #see baseparser.Command
     return command.main(args[1:], options)
 
 
@@ -190,76 +224,6 @@ class FrozenRequirement(object):
         if self.editable:
             req = '-e %s' % req
         return '\n'.join(list(self.comments)+[str(req)])+'\n'
-
-############################################################
-## Requirement files
-
-
-def call_subprocess(cmd, show_stdout=True,
-                    filter_stdout=None, cwd=None,
-                    raise_on_returncode=True,
-                    command_level=logger.DEBUG, command_desc=None,
-                    extra_environ=None):
-    if command_desc is None:
-        cmd_parts = []
-        for part in cmd:
-            if ' ' in part or '\n' in part or '"' in part or "'" in part:
-                part = '"%s"' % part.replace('"', '\\"')
-            cmd_parts.append(part)
-        command_desc = ' '.join(cmd_parts)
-    if show_stdout:
-        stdout = None
-    else:
-        stdout = subprocess.PIPE
-    logger.log(command_level, "Running command %s" % command_desc)
-    env = os.environ.copy()
-    if extra_environ:
-        env.update(extra_environ)
-    try:
-        proc = subprocess.Popen(
-            cmd, stderr=subprocess.STDOUT, stdin=None, stdout=stdout,
-            cwd=cwd, env=env)
-    except Exception:
-        e = sys.exc_info()[1]
-        logger.fatal(
-            "Error %s while executing command %s" % (e, command_desc))
-        raise
-    all_output = []
-    if stdout is not None:
-        stdout = proc.stdout
-        while 1:
-            line = console_to_str(stdout.readline())
-            if not line:
-                break
-            line = line.rstrip()
-            all_output.append(line + '\n')
-            if filter_stdout:
-                level = filter_stdout(line)
-                if isinstance(level, tuple):
-                    level, line = level
-                logger.log(level, line)
-                if not logger.stdout_level_matches(level):
-                    logger.show_progress()
-            else:
-                logger.info(line)
-    else:
-        returned_stdout, returned_stderr = proc.communicate()
-        all_output = [returned_stdout or '']
-    proc.wait()
-    if proc.returncode:
-        if raise_on_returncode:
-            if all_output:
-                logger.notify('Complete output from command %s:' % command_desc)
-                logger.notify('\n'.join(all_output) + '\n----------------------------------------')
-            raise InstallationError(
-                "Command %s failed with error code %s in %s"
-                % (command_desc, proc.returncode, cwd))
-        else:
-            logger.warn(
-                "Command %s had error code %s in %s"
-                % (command_desc, proc.returncode, cwd))
-    if stdout is not None:
-        return ''.join(all_output)
 
 
 if __name__ == '__main__':
