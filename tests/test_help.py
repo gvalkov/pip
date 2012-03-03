@@ -66,7 +66,7 @@ def test_help_commands_equally_functional():
     """
     reset_env()
 
-    results = map(run_pip, ('help', '--help'))
+    results = list(map(run_pip, ('help', '--help')))
     results.append(run_pip())
 
     out = map(lambda x: x.stdout, results)

@@ -77,7 +77,7 @@ def autocomplete():
         # show options of main parser only when necessary
         if current.startswith('-') or current.startswith('--'):
             opts = [i.option_list for i in parser.option_groups]
-            opts = reduce(list.__add__, opts)
+            opts = (o for it in opts for o in it) #flatten without reduce
 
             subcommands += [i.get_opt_string() for i in opts
                             if i.help != optparse.SUPPRESS_HELP]
