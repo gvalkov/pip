@@ -11,6 +11,6 @@ script: nosetests
 notifications:
 branches:
   only:
-    - develop
+    - pull463
 env:
   - PIP_USE_MIRRORS=true
