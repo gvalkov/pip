@@ -14,5 +14,6 @@ notifications:
 branches:
   only:
     - develop
+    - rework-commands-re
 env:
   - PIP_USE_MIRRORS=true
