@@ -18,8 +18,8 @@ class InstallCommand(Command):
     summary = 'Install packages'
     bundle = False
 
-    def __init__(self, *args, **kw):
-        super(InstallCommand, self).__init__(*args, **kw)
+    def __init__(self):
+        super(InstallCommand, self).__init__()
         self.parser.add_option(
             '-e', '--editable',
             dest='editables',

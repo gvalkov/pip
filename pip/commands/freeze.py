@@ -13,8 +13,8 @@ class FreezeCommand(Command):
     usage = '%prog [OPTIONS]'
     summary = 'Output all currently installed packages (exact versions) to stdout'
 
-    def __init__(self, *args, **kw):
-        super(FreezeCommand, self).__init__(*args, **kw)
+    def __init__(self):
+        super(FreezeCommand, self).__init__()
         self.parser.add_option(
             '-r', '--requirement',
             dest='requirement',

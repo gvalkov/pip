@@ -13,7 +13,7 @@ from pip.download import urlopen
 from pip.exceptions import (BadCommand, InstallationError, UninstallationError,
                             CommandError)
 from pip.backwardcompat import StringIO
-from pip.baseparser import ConfigOptionParser, UpdatingDefaultsHelpFormatter
+from pip.baseparser import ConfigOptionParser, UpdatingDefaultsHelpFormatter, create_main_parser
 from pip.status_codes import SUCCESS, ERROR, UNKNOWN_ERROR, VIRTUALENV_NOT_FOUND
 from pip.util import get_prog
 
@@ -30,55 +30,24 @@ class Command(object):
     usage = None
     hidden = False
 
-    def __init__(self, main_parser):
+    def __init__(self):
         parser_kw = {
             'usage' : self.usage,
+            'add_help_option' : False,
             'prog'  : '%s %s' % (get_prog(), self.name),
             'formatter' : UpdatingDefaultsHelpFormatter(),
             'name' : self.name,
         }
 
-        self.main_parser = main_parser
-        self.parser = ConfigOptionParser(**parser_kw)
-
-        # Re-add all options and option groups.
-        for group in main_parser.option_groups:
-            self._copy_option_group(self.parser, group)
-
-        # Copies all general options from the main parser.
-        self._copy_options(self.parser, main_parser.option_list)
-    
-    def _copy_options(self, parser, options):
-        """Populate an option parser or group with options."""
-        for option in options:
-            if not option.dest or option.dest == 'help':
-                continue
-            parser.add_option(option)
-
-    def _copy_option_group(self, parser, group):
-        """Copy option group (including options) to another parser."""
-        new_group = optparse.OptionGroup(parser, group.title)
-        self._copy_options(new_group, group.option_list)
-
-        parser.add_option_group(new_group)
-
-    def merge_options(self, initial_options, options):
-        # Make sure we have all global options carried over
-        for attr in ['log', 'proxy', 'require_venv',
-                     'log_explicit_levels', 'log_file',
-                     'timeout', 'default_vcs',
-                     'skip_requirements_regex',
-                     'no_input', 'exists_action']:
-            setattr(options, attr, getattr(initial_options, attr) or getattr(options, attr))
-        options.quiet += initial_options.quiet
-        options.verbose += initial_options.verbose
+        self.parser = create_main_parser(parser_kw)
+        # self.parser = ConfigOptionParser(**parser_kw)
 
     def setup_logging(self):
         pass
 
     def main(self, args, initial_options):
         options, args = self.parser.parse_args(args)
-        self.merge_options(initial_options, options)
+        # self.merge_options(initial_options, options)
 
         level = 1 # Notify
         level += options.verbose
