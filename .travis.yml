@@ -15,7 +15,7 @@ notifications:
   irc: "irc.freenode.org#pip"
 branches:
   only:
-    - develop
+    - rework-commands-v2-travis
 matrix:
   allow_failures:
     - python: 3.1
