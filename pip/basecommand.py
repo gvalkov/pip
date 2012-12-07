@@ -42,12 +42,23 @@ class Command(object):
         self.parser = create_main_parser(parser_kw)
         # self.parser = ConfigOptionParser(**parser_kw)
 
+    def merge_options(self, initial_options, options):
+        # Make sure we have all global options carried over
+        for attr in ['log', 'proxy', 'require_venv',
+                     'log_explicit_levels', 'log_file',
+                     'timeout', 'default_vcs',
+                     'skip_requirements_regex',
+                     'no_input', 'exists_action']:
+            setattr(options, attr, getattr(initial_options, attr) or getattr(options, attr))
+        options.quiet += initial_options.quiet
+        options.verbose += initial_options.verbose
+
     def setup_logging(self):
         pass
 
     def main(self, args, initial_options):
         options, args = self.parser.parse_args(args)
-        # self.merge_options(initial_options, options)
+        self.merge_options(initial_options, options)
 
         level = 1 # Notify
         level += options.verbose
