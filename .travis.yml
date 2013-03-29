@@ -16,7 +16,7 @@ notifications:
   irc: "irc.freenode.org#pip"
 branches:
   only:
-    - develop
+    - install-options-rebased
     - 1.3.X
 env:
   - PIP_USE_MIRRORS=true
