@@ -1,137 +1,246 @@
+
+"""
+Routines for parsing requirements files (i.e. requirements.txt).
+"""
+
 from __future__ import absolute_import
 
 import os
 import re
 
 from pip._vendor.six.moves.urllib import parse as urllib_parse
+from pip._vendor.six.moves import filterfalse
 
 from pip.download import get_file_content
 from pip.req.req_install import InstallRequirement
+from pip.exceptions import RequirementsFileParseError
 from pip.utils import normalize_name
 
-_scheme_re = re.compile(r'^(http|https|file):', re.I)
+
+#------------------------------------------------------------------------------
+_scheme_re  = re.compile(r'^(http|https|file):', re.I)
+_comment_re = re.compile(r'(^|\s)#.*$')
+
+# Flags that don't take any options.
+parser_flags = set([
+    '--no-index',
+    '--allow-all-external',
+    '--no-use-wheel',
+])
+
+# Flags that take options.
+parser_options = set([
+    '-i', '--index-url',
+    '-f', '--find-links',
+    '--extra-index-url',
+    '--allow-external',
+    '--allow-unverified',
+])
+
+# Encountering any of these is a no-op.
+parser_compat = set([
+    '-Z', '--always-unzip', #
+    '--use-wheel',          # Default in 1.5
+    '--no-allow-external',  # Remove in 7.0
+    '--no-allow-insecure',  # Remove in 7.0
+])
+
+# The types of lines understood by the requirements file parser.
+REQUIREMENT = 0
+REQUIREMENT_FILE = 1
+REQUIREMENT_EDITABLE = 2
+FLAG = 3
+OPTION = 4
+IGNORE = 5
 
 
+#------------------------------------------------------------------------------
 def parse_requirements(filename, finder=None, comes_from=None, options=None,
                        session=None):
+    """
+    Parse a requirements file and yield InstallRequirement instances.
+
+    :param filename:   Path or url of requirements file.
+    :param finder:     Instance of pip.index.PackageFinder.
+    :param comes_from: Origin summary for yield requirements.
+    :param options:    Options dictionary.
+    :param session:    Instance of pip.download.PipSession.
+    """
+
     if session is None:
         raise TypeError(
             "parse_requirements() missing 1 required keyword argument: "
             "'session'"
         )
 
-    skip_match = None
+    _, content = get_file_content(filename, comes_from=comes_from, session=session)
+    for item in parse_content(filename, content, finder, comes_from, options):
+        yield item
+
+
+def parse_content(filename, content, finder=None, comes_from=None, options=None, session=None):
+    # Split, sanitize and join lines with continuations.
+    content = content.splitlines()
+    content = ignore_comments(content)
+    content = join_lines(content)
+
+    # Optionally exclude lines that match '--skip-requirements-regex'.
     skip_regex = options.skip_requirements_regex if options else None
     if skip_regex:
-        skip_match = re.compile(skip_regex)
-    reqs_file_dir = os.path.dirname(os.path.abspath(filename))
-    filename, content = get_file_content(
-        filename,
-        comes_from=comes_from,
-        session=session,
-    )
-    for line_number, line in enumerate(content.splitlines(), 1):
-        line = line.strip()
+        content = filterfalse(re.compile(skip_regex).search, content)
 
-        # Remove comments from file
-        line = re.sub(r"(^|\s)#.*$", "", line)
+    for line_number, line in enumerate(content, 1):
+        # The returned value depends on the type of line that was parsed.
+        linetype, value = parse_line(line)
 
-        if not line or line.startswith('#'):
-            continue
-        if skip_match and skip_match.search(line):
-            continue
-        if line.startswith('-r') or line.startswith('--requirement'):
-            if line.startswith('-r'):
-                req_url = line[2:].strip()
-            else:
-                req_url = line[len('--requirement'):].strip().strip('=')
+        #----------------------------------------------------------------------
+        if linetype == REQUIREMENT:
+            comes_from = '-r {} (line {})'.format(filename, line_number)
+            isolated = options.isolated_mode if options else False
+            yield InstallRequirement.from_line(
+                value, comes_from, isolated=isolated
+            )
+
+        #----------------------------------------------------------------------
+        elif linetype == REQUIREMENT_EDITABLE:
+            comes_from = '-r {} (line {})'.format(filename, line_number)
+            isolated = options.isolated_mode if options else False,
+            default_vcs = options.default_vcs if options else None,
+            yield InstallRequirement.from_editable(
+                value, comes_from=comes_from, default_vcs=default_vcs, isolated=isolated
+            )
+
+        #----------------------------------------------------------------------
+        elif linetype == REQUIREMENT_FILE:
             if _scheme_re.search(filename):
-                # Relative to a URL
-                req_url = urllib_parse.urljoin(filename, req_url)
+                # Relative to an URL.
+                req_url = urllib_parse.urljoin(filename, value)
             elif not _scheme_re.search(req_url):
-                req_url = os.path.join(os.path.dirname(filename), req_url)
-            for item in parse_requirements(
-                    req_url, finder,
-                    comes_from=filename,
-                    options=options,
-                    session=session):
-                yield item
-        elif line.startswith('-Z') or line.startswith('--always-unzip'):
-            # No longer used, but previously these were used in
-            # requirement files, so we'll ignore.
-            pass
-        elif line.startswith('-f') or line.startswith('--find-links'):
-            if line.startswith('-f'):
-                line = line[2:].strip()
-            else:
-                line = line[len('--find-links'):].strip().lstrip('=')
-            # FIXME: it would be nice to keep track of the source of
-            # the find_links:
-            # support a find-links local path relative to a requirements file
-            relative_to_reqs_file = os.path.join(reqs_file_dir, line)
-            if os.path.exists(relative_to_reqs_file):
-                line = relative_to_reqs_file
-            if finder:
-                finder.find_links.append(line)
-        elif line.startswith('-i') or line.startswith('--index-url'):
-            if line.startswith('-i'):
-                line = line[2:].strip()
-            else:
-                line = line[len('--index-url'):].strip().lstrip('=')
-            if finder:
-                finder.index_urls = [line]
-        elif line.startswith('--extra-index-url'):
-            line = line[len('--extra-index-url'):].strip().lstrip('=')
-            if finder:
-                finder.index_urls.append(line)
-        elif line.startswith('--use-wheel'):
-            # Default in 1.5
-            pass
-        elif line.startswith('--no-use-wheel'):
-            if finder:
+                req_dir = os.path.dirname(filename)
+                req_url = os.path.join(os.path.dirname(filename), value)
+            # TODO: Why not use `comes_from='-r {} (line {})'` here as well?
+            parser = parse_requirements(req_url, finder, comes_from, options, session)
+            for req in parser:
+                yield req
+
+        #----------------------------------------------------------------------
+        elif linetype == FLAG:
+            if not finder:
+                continue
+
+            if finder and value == '--no-use-wheel':
                 finder.use_wheel = False
-        elif line.startswith('--no-index'):
-            if finder:
+            elif value == '--no-index':
                 finder.index_urls = []
-        elif line.startswith("--allow-external"):
-            line = line[len("--allow-external"):].strip().lstrip("=")
-            if finder:
-                finder.allow_external |= set([normalize_name(line).lower()])
-        elif line.startswith("--allow-all-external"):
-            if finder:
+            elif value == '--allow-all-external':
                 finder.allow_all_external = True
-        # Remove in 7.0
-        elif line.startswith("--no-allow-external"):
-            pass
-        # Remove in 7.0
-        elif line.startswith("--no-allow-insecure"):
-            pass
-        # Remove after 7.0
-        elif line.startswith("--allow-insecure"):
-            line = line[len("--allow-insecure"):].strip().lstrip("=")
-            if finder:
+
+        #----------------------------------------------------------------------
+        elif linetype == OPTION:
+            if not finder:
+                continue
+
+            opt, value = value
+            if opt == '-i' or opt == '--index-url':
+                finder.index_urls = [value]
+            elif opt == '--extra-index-url':
+                finder.index_urls.append(value)
+            elif opt == '--allow-external':
+                finder.allow_external |= set([normalize_name(value).lower()])
+            elif opt == '--allow-insecure':
+                # Remove after 7.0
                 finder.allow_unverified |= set([normalize_name(line).lower()])
-        elif line.startswith("--allow-unverified"):
-            line = line[len("--allow-unverified"):].strip().lstrip("=")
-            if finder:
-                finder.allow_unverified |= set([normalize_name(line).lower()])
-        else:
-            comes_from = '-r %s (line %s)' % (filename, line_number)
-            if line.startswith('-e') or line.startswith('--editable'):
-                if line.startswith('-e'):
-                    line = line[2:].strip()
-                else:
-                    line = line[len('--editable'):].strip().lstrip('=')
-                req = InstallRequirement.from_editable(
-                    line,
-                    comes_from=comes_from,
-                    default_vcs=options.default_vcs if options else None,
-                    isolated=options.isolated_mode if options else False,
-                )
+            elif opt == '-f' or opt == '--find-links':
+                # FIXME: it would be nice to keep track of the source
+                # of the find_links: support a find-links local path
+                # relative to a requirements file.
+                req_dir = os.path.dirname(os.path.abspath(filename))
+                relative_to_reqs_file = os.path.join(req_dir, value)
+                if os.path.exists(relative_to_reqs_file):
+                    value = relative_to_reqs_file
+                finder.find_links.append(value)
+
+        #----------------------------------------------------------------------
+        elif linetype == IGNORE:
+            pass
+
+
+def parse_line(line):
+    if not line.startswith('-'):
+        return REQUIREMENT, line
+
+    firstword, rest = partition_line(line)
+
+    #--------------------------------------------------------------------------
+    if firstword == '-e' or firstword == '--editable':
+        return REQUIREMENT_EDITABLE, rest
+
+    #--------------------------------------------------------------------------
+    if firstword == '-r' or firstword == '--requirement':
+        return REQUIREMENT_FILE, rest
+
+    #--------------------------------------------------------------------------
+    if firstword in parser_flags:
+        if rest:
+            msg = 'Option {!r} does not accept values.'.format(firstword)
+            raise RequirementsFileParseError(msg)
+        return FLAG, firstword
+
+    #--------------------------------------------------------------------------
+    if firstword in parser_options:
+        if not rest:
+            msg = 'Option {!r} requires value.'.format(firstword)
+            raise RequirementsFileParseError(msg)
+        return OPTION, (firstword, rest)
+
+    #--------------------------------------------------------------------------
+    if firstword in parser_compat:
+        return IGNORE, line
+
+
+#------------------------------------------------------------------------------
+# Utility functions related to requirements file parsing.
+def join_lines(iterator):
+    """
+    Joins a line ending in '\' with the previous line.
+    """
+
+    lines = []
+    for line in iterator:
+        if not line.endswith('\\'):
+            if lines:
+                lines.append(line)
+                yield ''.join(lines)
+                lines = []
             else:
-                req = InstallRequirement.from_line(
-                    line,
-                    comes_from,
-                    isolated=options.isolated_mode if options else False,
-                )
-            yield req
+                yield line
+        else:
+            lines.append(line.strip('\\'))
+
+    # TODO: handle space after '\'.
+    # TODO: handle '\' on last line.
+
+def ignore_comments(iterator):
+    """
+    Strips and filters empty or commented lines.
+    """
+
+    for line in iterator:
+        line = _comment_re.sub('', line)
+        line = line.strip()
+        if line:
+            yield line
+
+def partition_line(line):
+    firstword, _, rest = line.partition('=')
+    firstword = firstword.strip()
+
+    if ' ' in firstword:
+        firstword, _, rest = line.partition(' ')
+        firstword = firstword.strip()
+
+    rest = rest.strip()
+    return firstword, rest
+
+
+__all__ = 'parse_requirements'

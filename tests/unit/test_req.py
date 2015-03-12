@@ -6,11 +6,18 @@ import tempfile
 import pytest
 
 from mock import Mock, patch, mock_open
+from textwrap import dedent
 from pip.exceptions import (
     PreviousBuildDirError, InvalidWheelFilename, UnsupportedWheel,
+    RequirementsFileParseError,
 )
 from pip.download import PipSession
 from pip.index import PackageFinder
+from pip.req.req_file import (parse_requirements,
+                              parse_content,
+                              parse_line,
+                              join_lines,
+                              REQUIREMENT_EDITABLE, FLAG, OPTION)
 from pip.req import (InstallRequirement, RequirementSet,
                      Requirements, parse_requirements)
 from pip.req.req_install import parse_editable
@@ -357,3 +364,80 @@ def test_req_file_no_finder(tmpdir):
         """)
 
     parse_requirements(tmpdir.join("req.txt"), session=PipSession())
+
+
+def test_join_line_continuations():
+    """
+    Test joining of line continuations
+    """
+
+    lines = dedent('''\
+    line 1
+    line 2:1 \\
+    line 2:2
+    line 3:1 \\
+    line 3:2 \\
+    line 3:3
+    line 4
+    ''').splitlines()
+
+    expect = [
+        'line 1',
+        'line 2:1 line 2:2',
+        'line 3:1 line 3:2 line 3:3',
+        'line 4',
+    ]
+
+    assert expect == list(join_lines(lines))
+
+
+def test_parse_editable_from_requirements():
+    lines = [
+        '--editable svn+https://foo#egg=foo',
+        '--editable=svn+https://foo#egg=foo',
+        '-e svn+https://foo#egg=foo'
+    ]
+
+    res = [parse_line(i) for i in lines]
+    assert res == [(REQUIREMENT_EDITABLE, 'svn+https://foo#egg=foo')] * 3
+
+    req = parse_content('fn', lines[0]).next()
+    assert req.name == 'foo'
+    assert req.link.url == 'svn+https://foo#egg=foo'
+
+
+@pytest.fixture
+def finder():
+    session = PipSession()
+    return PackageFinder([], [], session=session)
+
+def test_parse_options_from_requirements(finder):
+    pl = parse_line
+
+    pl('-i abc') == (OPTION, ('-i', 'abc'))
+    pl('-i=abc') == (OPTION, ('-i', 'abc'))
+    pl('-i  =  abc') == (OPTION, ('--index-url', 'abc'))
+
+    pl('--index-url abc') == (OPTION, ('--index-url', 'abc'))
+    pl('--index-url=abc') == (OPTION, ('--index-url', 'abc'))
+    pl('--index-url   =   abc') == (OPTION, ('--index-url', 'abc'))
+
+    with pytest.raises(RequirementsFileParseError):
+        parse_line('--allow-external')
+
+    res = parse_line('--extra-index-url 123')
+    assert res == (OPTION, ('--extra-index-url', '123'))
+
+    next(parse_content('fn', '-i abc', finder=finder), None)
+    assert finder.index_urls == ['abc']
+
+
+def test_parse_flags_from_requirements(finder):
+    assert parse_line('--no-index') == (FLAG, ('--no-index'))
+    assert parse_line('--no-use-wheel') == (FLAG, ('--no-use-wheel'))
+
+    with pytest.raises(RequirementsFileParseError):
+        parse_line('--no-use-wheel true')
+
+    next(parse_content('fn', '--no-index', finder=finder), None)
+    assert finder.index_urls == []
