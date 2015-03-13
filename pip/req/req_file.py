@@ -7,6 +7,8 @@ from __future__ import absolute_import
 
 import os
 import re
+import shlex
+import getopt
 
 from pip._vendor.six.moves.urllib import parse as urllib_parse
 from pip._vendor.six.moves import filterfalse
@@ -45,6 +47,14 @@ parser_compat = set([
     '--no-allow-insecure',  # Remove in 7.0
 ])
 
+# The following options and flags can be used with requirements. For example:
+# INITools==0.2 --install-options="--prefix=/opt"
+parser_requirement_flags = set()
+parser_requirement_options = set([
+    '--install-options',
+    '--global-options',
+])
+
 # The types of lines understood by the requirements file parser.
 REQUIREMENT = 0
 REQUIREMENT_FILE = 1
@@ -63,7 +73,7 @@ def parse_requirements(filename, finder=None, comes_from=None, options=None,
     :param filename:   Path or url of requirements file.
     :param finder:     Instance of pip.index.PackageFinder.
     :param comes_from: Origin summary for yield requirements.
-    :param options:    Options dictionary.
+    :param options:    Global options.
     :param session:    Instance of pip.download.PipSession.
     """
 
@@ -95,10 +105,11 @@ def parse_content(filename, content, finder=None, comes_from=None, options=None,
 
         #----------------------------------------------------------------------
         if linetype == REQUIREMENT:
+            req, opts = value
             comes_from = '-r {} (line {})'.format(filename, line_number)
             isolated = options.isolated_mode if options else False
             yield InstallRequirement.from_line(
-                value, comes_from, isolated=isolated
+                req, comes_from, isolated=isolated
             )
 
         #----------------------------------------------------------------------
@@ -167,10 +178,19 @@ def parse_content(filename, content, finder=None, comes_from=None, options=None,
 
 def parse_line(line):
     if not line.startswith('-'):
-        return REQUIREMENT, line
+        if ' --' in line:
+            req, opts = line.split(' --', 1)
+            opts = parse_requirement_options('--%s' % opts,
+                parser_requirement_flags,
+                parser_requirement_options
+            )
+        else:
+            req = line
+            opts = {}
+
+        return REQUIREMENT, (req, opts)
 
     firstword, rest = partition_line(line)
-
     #--------------------------------------------------------------------------
     if firstword == '-e' or firstword == '--editable':
         return REQUIREMENT_EDITABLE, rest
@@ -196,6 +216,17 @@ def parse_line(line):
     #--------------------------------------------------------------------------
     if firstword in parser_compat:
         return IGNORE, line
+
+
+def parse_requirement_options(req_line, flags=None, options=None):
+    long_opts = []
+    if options:
+        long_opts += ['%s=' % i.lstrip('-') for i in options]
+    if flags:
+        long_opts += [i.lstrip('-') for i in flags]
+
+    opts, _ = getopt.getopt(shlex.split(req_line), '', long_opts)
+    return dict(opts)
 
 
 #------------------------------------------------------------------------------

@@ -14,10 +14,12 @@ from pip.exceptions import (
 from pip.download import PipSession
 from pip.index import PackageFinder
 from pip.req.req_file import (parse_requirements,
+                              parse_requirement_options,
                               parse_content,
                               parse_line,
                               join_lines,
-                              REQUIREMENT_EDITABLE, FLAG, OPTION)
+                              REQUIREMENT_EDITABLE,
+                              REQUIREMENT, FLAG, OPTION)
 from pip.req import (InstallRequirement, RequirementSet,
                      Requirements, parse_requirements)
 from pip.req.req_install import parse_editable
@@ -441,3 +443,24 @@ def test_parse_flags_from_requirements(finder):
 
     next(parse_content('fn', '--no-index', finder=finder), None)
     assert finder.index_urls == []
+
+
+def test_get_requirement_options():
+    pro = parse_requirement_options
+
+    res = pro('--aflag --bflag', ['--aflag', '--bflag'])
+    assert res == {'--aflag': '', '--bflag': ''}
+
+    res = pro('--install-options="--abc --zxc"', [], ['--install-options'])
+    assert res == {'--install-options': '--abc --zxc'}
+
+    res = pro('--aflag --global-options="--abc" --install-options="--aflag"',
+              ['--aflag'], ['--install-options', '--global-options'])
+    assert res == {'--aflag': '', '--global-options': '--abc', '--install-options': '--aflag'}
+
+    line = 'INITools==2.0 --global-options="--one --two -3" --install-options="--prefix=/opt"'
+    assert parse_line(line) == (REQUIREMENT, (
+        'INITools==2.0', {
+            '--global-options': '--one --two -3',
+            '--install-options': '--prefix=/opt'
+        }))
