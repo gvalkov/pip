@@ -220,6 +220,7 @@ def join_lines(iterator):
     # TODO: handle space after '\'.
     # TODO: handle '\' on last line.
 
+
 def ignore_comments(iterator):
     """
     Strips and filters empty or commented lines.
@@ -230,6 +231,7 @@ def ignore_comments(iterator):
         line = line.strip()
         if line:
             yield line
+
 
 def partition_line(line):
     firstword, _, rest = line.partition('=')
