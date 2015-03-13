@@ -115,7 +115,7 @@ def parse_content(filename, content, finder=None, comes_from=None, options=None,
             if _scheme_re.search(filename):
                 # Relative to an URL.
                 req_url = urllib_parse.urljoin(filename, value)
-            elif not _scheme_re.search(req_url):
+            elif not _scheme_re.search(value):
                 req_dir = os.path.dirname(filename)
                 req_url = os.path.join(os.path.dirname(filename), value)
             # TODO: Why not use `comes_from='-r {} (line {})'` here as well?
