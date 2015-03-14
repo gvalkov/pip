@@ -84,7 +84,7 @@ def parse_requirements(filename, finder=None, comes_from=None, options=None,
         )
 
     _, content = get_file_content(filename, comes_from=comes_from, session=session)
-    for item in parse_content(filename, content, finder, comes_from, options):
+    for item in parse_content(filename, content, finder, comes_from, options, session):
         yield item
 
 
